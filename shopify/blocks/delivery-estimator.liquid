@@ -1,0 +1,42 @@
+{% render 'delivery-estimator', block: block %}
+
+{% schema %}
+{
+  "name": "Delivery Estimator",
+  "settings": [
+    { "type": "text", "id": "title", "label": "Title", "default": "Check Delivery Date" },
+    { "type": "text", "id": "button_text", "label": "Button text", "default": "Check" },
+    { "type": "text", "id": "placeholder", "label": "Input placeholder", "default": "Enter your pincode" },
+    {
+      "type": "text",
+      "id": "proxy_url",
+      "label": "Delivery API URL (Vercel)",
+      "default": "https://customblockdelivery.vercel.app",
+      "info": "Your Vercel proxy base URL. Public, no credentials. Replace with your real deployment URL."
+    },
+    {
+      "type": "text",
+      "id": "warehouse_pincode",
+      "label": "Warehouse pincode override",
+      "info": "Optional. Leave blank to use the default (411023) set in Vercel. Set per product to ship from a different pincode."
+    },
+    {
+      "type": "text",
+      "id": "fallback_weight",
+      "label": "Fallback weight (kg)",
+      "default": "0.5",
+      "info": "Used only when the product/variant has no weight set in Shopify."
+    },
+    { "type": "header", "content": "Colors" },
+    { "type": "color", "id": "accent_color", "label": "Accent color (button + border)", "default": "#000000" },
+    { "type": "color", "id": "success_color", "label": "Success color", "default": "#22c55e" },
+    { "type": "color", "id": "error_color", "label": "Error color", "default": "#ef4444" },
+    { "type": "color", "id": "background_color", "label": "Background color", "default": "#f9f9f9" },
+    { "type": "header", "content": "Options" },
+    { "type": "checkbox", "id": "show_courier_name", "label": "Show courier name", "default": true }
+  ],
+  "presets": [
+    { "name": "Delivery Estimator" }
+  ]
+}
+{% endschema %}

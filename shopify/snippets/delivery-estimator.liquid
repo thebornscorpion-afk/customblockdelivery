@@ -1,0 +1,197 @@
+{%- comment -%}
+  Delivery date estimator.
+
+  Calls the Shiprocket serviceability proxy (hosted on Vercel). NO credentials
+  live here — only the public proxy URL. The Shiprocket token stays server-side
+  in Vercel env vars, so nothing sensitive is exposed on the live storefront.
+
+  Accepts: block (the theme block whose settings drive title/colors/etc.)
+
+  Weight: read from the product's native Shopify weight (per variant, grams ->
+  kg). Falls back to the block's "fallback_weight" if the product has none.
+
+  Warehouse pincode: optional per-product override via block setting; when blank
+  the proxy uses the WAREHOUSE_PINCODE default configured in Vercel.
+{%- endcomment -%}
+
+{%- liquid
+  assign de_title = block.settings.title | default: 'Check Delivery Date'
+  assign de_button = block.settings.button_text | default: 'Check'
+  assign de_placeholder = block.settings.placeholder | default: 'Enter your pincode'
+  assign de_accent = block.settings.accent_color | default: '#000000'
+  assign de_success = block.settings.success_color | default: '#22c55e'
+  assign de_error = block.settings.error_color | default: '#ef4444'
+  assign de_bg = block.settings.background_color | default: '#f9f9f9'
+  assign de_proxy = block.settings.proxy_url | default: 'https://customblockdelivery.vercel.app'
+
+  assign de_product = closest.product | default: product
+  assign de_variant = de_product.selected_or_first_available_variant
+  assign de_weight_g = de_variant.weight | default: 0
+  assign de_weight_kg = de_weight_g | divided_by: 1000.00
+  assign de_fallback_weight = block.settings.fallback_weight | default: 0.5
+  if de_weight_kg <= 0
+    assign de_weight_kg = de_fallback_weight
+  endif
+
+  assign de_pickup = block.settings.warehouse_pincode | strip
+-%}
+
+<div
+  class="delivery-estimator"
+  id="DeliveryEstimator-{{ block.id }}"
+  data-proxy="{{ de_proxy | strip }}"
+  data-weight="{{ de_weight_kg }}"
+  {% if de_pickup != blank %}data-pickup="{{ de_pickup }}"{% endif %}
+  data-show-courier="{% if block.settings.show_courier_name %}1{% else %}0{% endif %}"
+  style="--de-accent: {{ de_accent }}; --de-success: {{ de_success }}; --de-error: {{ de_error }}; --de-bg: {{ de_bg }};"
+  {{ block.shopify_attributes }}
+>
+  {%- if de_title != blank -%}
+    <div class="delivery-estimator__title">{{ de_title }}</div>
+  {%- endif -%}
+  <div class="delivery-estimator__row">
+    <input
+      type="tel"
+      inputmode="numeric"
+      maxlength="6"
+      class="delivery-estimator__input"
+      placeholder="{{ de_placeholder | escape }}"
+      data-de-input
+      aria-label="{{ de_placeholder | escape }}"
+    >
+    <button type="button" class="delivery-estimator__btn" data-de-btn>{{ de_button }}</button>
+  </div>
+  <div class="delivery-estimator__result" data-de-result aria-live="polite"></div>
+</div>
+
+<style>
+  #DeliveryEstimator-{{ block.id }}.delivery-estimator {
+    background: var(--de-bg);
+    border: 1px solid var(--de-accent);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  #DeliveryEstimator-{{ block.id }} .delivery-estimator__title {
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  #DeliveryEstimator-{{ block.id }} .delivery-estimator__row {
+    display: flex;
+    gap: 8px;
+  }
+  #DeliveryEstimator-{{ block.id }} .delivery-estimator__input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid #d0d0d0;
+    border-radius: 8px;
+    font-size: 14px;
+  }
+  #DeliveryEstimator-{{ block.id }} .delivery-estimator__input:focus {
+    outline: none;
+    border-color: var(--de-accent);
+  }
+  #DeliveryEstimator-{{ block.id }} .delivery-estimator__btn {
+    flex: 0 0 auto;
+    padding: 10px 18px;
+    background: var(--de-accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #DeliveryEstimator-{{ block.id }} .delivery-estimator__btn[disabled] {
+    opacity: 0.6;
+    cursor: default;
+  }
+  #DeliveryEstimator-{{ block.id }} .delivery-estimator__result {
+    margin-top: 10px;
+    font-size: 14px;
+    line-height: 1.4;
+    display: none;
+  }
+  #DeliveryEstimator-{{ block.id }} .delivery-estimator__result.is-visible { display: block; }
+  #DeliveryEstimator-{{ block.id }} .delivery-estimator__result.is-success { color: var(--de-success); }
+  #DeliveryEstimator-{{ block.id }} .delivery-estimator__result.is-error { color: var(--de-error); }
+  #DeliveryEstimator-{{ block.id }} .delivery-estimator__result.is-loading { opacity: 0.7; }
+</style>
+
+<script>
+(function () {
+  var root = document.getElementById('DeliveryEstimator-{{ block.id }}');
+  if (!root || root.dataset.deInit) return;
+  root.dataset.deInit = '1';
+
+  var input  = root.querySelector('[data-de-input]');
+  var btn    = root.querySelector('[data-de-btn]');
+  var result = root.querySelector('[data-de-result]');
+  var proxy  = (root.dataset.proxy || '').replace(/\/+$/, '');
+  var weight = root.dataset.weight || '';
+  var pickup = root.dataset.pickup || '';
+  var showCourier = root.dataset.showCourier === '1';
+
+  function show(msg, cls) {
+    result.innerHTML = msg;
+    result.className = 'delivery-estimator__result is-visible ' + cls;
+  }
+
+  function check() {
+    var pin = (input.value || '').replace(/\D/g, '');
+    if (pin.length !== 6) {
+      show('Please enter a valid 6-digit pincode.', 'is-error');
+      return;
+    }
+    if (!proxy) {
+      show('Delivery check is not configured.', 'is-error');
+      return;
+    }
+
+    btn.disabled = true;
+    show('Checking…', 'is-loading');
+
+    var url = proxy + '/api/serviceability?pincode=' + encodeURIComponent(pin)
+            + '&weight=' + encodeURIComponent(weight);
+    if (pickup) { url += '&pickup=' + encodeURIComponent(pickup); }
+
+    fetch(url, { method: 'GET' })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        var d = res.d || {};
+        if (res.ok && d.serviceable) {
+          var msg;
+          if (d.etd) {
+            msg = 'Delivery by <strong>' + d.etd + '</strong>';
+          } else if (d.estimated_days) {
+            msg = 'Delivers in <strong>' + d.estimated_days + ' days</strong>';
+          } else {
+            msg = 'Delivery available to <strong>' + pin + '</strong>';
+          }
+          if (showCourier && d.courier_name) {
+            msg += ' <span style="opacity:.75">via ' + d.courier_name + '</span>';
+          }
+          show(msg, 'is-success');
+        } else if (res.ok && d.serviceable === false) {
+          show('Sorry, we don’t deliver to <strong>' + pin + '</strong> yet.', 'is-error');
+        } else {
+          show((d && d.error) ? d.error : 'Could not check delivery right now. Please try again.', 'is-error');
+        }
+      })
+      .catch(function () {
+        show('Could not check delivery right now. Please try again.', 'is-error');
+      })
+      .finally(function () { btn.disabled = false; });
+  }
+
+  btn.addEventListener('click', check);
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); check(); }
+  });
+  input.addEventListener('input', function () {
+    input.value = input.value.replace(/\D/g, '').slice(0, 6);
+  });
+})();
+</script>
