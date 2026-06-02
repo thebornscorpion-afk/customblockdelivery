@@ -1,0 +1,10 @@
+{
+  "name": "sooperbrains-shiprocket-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Serverless proxy for the sooperbrains.com Shiprocket delivery-date estimator. Keeps the Shiprocket credential server-side and auto-refreshes the auth token.",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  }
+}
